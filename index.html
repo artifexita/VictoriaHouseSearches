@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Victoria Property &amp; NDIS / Walkability Map ($700k–$900k)</title>
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Left Sidebar -->
+    <aside id="sidebar" class="sidebar" aria-label="Property search and filters">
+      <div class="sidebar-header">
+        <div class="brand-row">
+          <h1 class="brand-title">🏡 Victoria Property &amp; NDIS Map</h1>
+          <div class="header-actions">
+            <button id="themeToggle" class="icon-btn" title="Toggle Dark/Light Theme" aria-label="Toggle Dark or Light Theme">🌓</button>
+            <button id="collapseSidebarBtn" class="icon-btn" title="Hide Sidebar" aria-label="Hide Sidebar">◀</button>
+          </div>
+        </div>
+        <p class="brand-subtitle">$700k–$900k · NDIS Physio/OT · Council · Shops · 1–3 km Parks/Beach</p>
+
+        <form id="addressSearchForm" class="search-bar" role="search">
+          <input
+            id="addressInput"
+            type="search"
+            placeholder="Add any VIC suburb (e.g. Sandringham)..."
+            aria-label="Search and add any Victoria suburb or address"
+          />
+          <button id="searchGoBtn" type="submit">Go</button>
+        </form>
+        <div id="searchStatus" class="search-status" aria-live="polite" hidden></div>
+      </div>
+
+      <!-- Filters -->
+      <section class="filters-panel" aria-label="Property filters">
+        <div class="filter-row">
+          <div class="filter-group">
+            <label for="regionSelect">Victoria Region</label>
+            <select id="regionSelect"></select>
+          </div>
+          <div class="filter-group">
+            <label for="typeSelect">Property Type</label>
+            <select id="typeSelect">
+              <option value="all">All (House / Townhouse / Unit)</option>
+              <option value="House">House</option>
+              <option value="Townhouse">Townhouse</option>
+              <option value="Unit">Villa / Unit</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="filter-row">
+          <div class="filter-group">
+            <label for="bedsSelect">Min Bedrooms</label>
+            <select id="bedsSelect">
+              <option value="2">2+ Bedrooms</option>
+              <option value="3" selected>3+ Bedrooms</option>
+              <option value="4">4+ Bedrooms</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label for="priceMaxSelect">Max Budget</label>
+            <select id="priceMaxSelect">
+              <option value="900000" selected>Up to $900,000</option>
+              <option value="850000">Up to $850,000</option>
+              <option value="800000">Up to $800,000</option>
+              <option value="750000">Up to $750,000</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="chip-row" role="group" aria-label="Nature & accessibility filters">
+          <button type="button" class="chip active" data-nature="all">All Nature</button>
+          <button type="button" class="chip" data-nature="Beach">🏖️ Beach</button>
+          <button type="button" class="chip" data-nature="National Park">🌲 National Park</button>
+          <button type="button" class="chip" data-nature="Park">🌳 Park / Trail</button>
+        </div>
+      </section>
+
+      <div class="results-meta">
+        <span id="resultsCount">Loading Victoria hubs...</span>
+        <button id="clearRingsBtn" class="clear-pin-btn" hidden>Clear 1–3 km rings</button>
+      </div>
+
+      <!-- Property Pockets List -->
+      <div id="propertyList" class="property-list" role="list"></div>
+    </aside>
+
+    <!-- Infinitely Scrollable Map Area -->
+    <main class="map-stage">
+      <button id="openSidebarBtn" class="sidebar-open-btn" aria-label="Show Sidebar">☰ Filters &amp; List</button>
+
+      <!-- Quick Region Jump Pills -->
+      <div id="regionBar" class="region-bar" aria-label="Quick region jump"></div>
+
+      <!-- Map View Switcher (Road / Satellite / Walk & Tracks) -->
+      <div class="map-mode-switcher" role="region" aria-label="Map view mode">
+        <div class="mode-buttons" role="tablist">
+          <button type="button" class="mode-btn active" data-mode="road" role="tab" aria-selected="true">🗺️ Road</button>
+          <button type="button" class="mode-btn" data-mode="satellite" role="tab" aria-selected="false">🛰️ Satellite</button>
+          <button type="button" class="mode-btn" data-mode="walk" role="tab" aria-selected="false">🥾 Walk / Tracks</button>
+        </div>
+        <div class="overlay-toggles">
+          <label>
+            <input type="checkbox" id="trailsOverlayToggle" />
+            <span>Walking Trails Overlay</span>
+          </label>
+          <label id="satLabelsWrap" hidden>
+            <input type="checkbox" id="satLabelsToggle" checked />
+            <span>Street Labels</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Map Canvas -->
+      <div id="map" role="application" aria-label="Interactive infinitely scrollable Victoria map"></div>
+
+      <!-- Layer Toggles & Legend -->
+      <div class="layer-dock" aria-label="Map layers">
+        <label class="layer-toggle">
+          <input type="checkbox" data-layer="properties" checked />
+          <span class="layer-dot" style="background: var(--c-prop)"></span>
+          <span>Properties ($700k–$900k)</span>
+        </label>
+        <label class="layer-toggle">
+          <input type="checkbox" data-layer="ndis" checked />
+          <span class="layer-dot" style="background: var(--c-ndis)"></span>
+          <span>NDIS Physio &amp; OT</span>
+        </label>
+        <label class="layer-toggle">
+          <input type="checkbox" data-layer="council" checked />
+          <span class="layer-dot" style="background: var(--c-council)"></span>
+          <span>Council Services</span>
+        </label>
+        <label class="layer-toggle">
+          <input type="checkbox" data-layer="shops" checked />
+          <span class="layer-dot" style="background: var(--c-shops)"></span>
+          <span>Shops</span>
+        </label>
+        <label class="layer-toggle">
+          <input type="checkbox" data-layer="transit" checked />
+          <span class="layer-dot" style="background: var(--c-transit)"></span>
+          <span>Public Transport</span>
+        </label>
+        <label class="layer-toggle">
+          <input type="checkbox" data-layer="nature" checked />
+          <span class="layer-dot" style="background: var(--c-nature)"></span>
+          <span>Parks / Nat. Parks / Beach</span>
+        </label>
+      </div>
+
+      <div class="walk-tip">
+        💡 <strong>Tip:</strong> Click any property or <strong>click anywhere on the map</strong> to check 1 km &amp; 3 km walking rings &amp; nearest services.
+      </div>
+    </main>
+  </div>
+
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
