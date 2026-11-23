@@ -25,7 +25,14 @@
   }
 
   let savedHubs = loadJson(STORAGE_HUBS);
-  let savedAmenities = loadJson(STORAGE_AMENITIES);
+  let savedAmenities = loadJson(STORAGE_AMENITIES).filter((a) => {
+    const n = (a.name || '').toLowerCase();
+    if (a.category === 'ndis' && /\b(vets?|veterinary|animals?|pets?|dentists?|dental)\b/.test(n)) return false;
+    if (a.category === 'nature' && /\b(dentists?|dental|medical|clinics?|vets?|pharmac|shops?)\b/.test(n)) return false;
+    if (a.category === 'council' && /\b(street library|little library|book box)\b/.test(n)) return false;
+    return true;
+  });
+  saveJson(STORAGE_AMENITIES, savedAmenities);
   let savedRegions = loadJson(STORAGE_REGIONS);
 
   // Merge saved items into live arrays (newest custom hubs at top of PROPERTIES)
@@ -841,7 +848,7 @@
 
     const isNdisPoi = (p) => {
       const n = p.name.toLowerCase();
-      if (/\b(vet|veterinary|animal|pet|dentist|dental|orthodont|beauty|nail|salon|spa|barber)\b/.test(n)) return false;
+      if (/\b(vets?|veterinary|animals?|pets?|dentists?|dental|orthodont|beauty|nail|salons?|spas?|barbers?)\b/.test(n)) return false;
       if (p.osm_value === 'veterinary' || p.osm_value === 'dentist') return false;
       return (
         p.osm_key === 'healthcare' ||
@@ -881,7 +888,7 @@
 
     const isNaturePoi = (p) => {
       const n = p.name.toLowerCase();
-      if (/\b(dentist|dental|medical|clinic|vet|hotel|motel|cafe|restaurant|bakery|shop|store|pharmacy|car park|parking|school|kindergarten|childcare|estate|apartments|real estate)\b/.test(n)) {
+      if (/\b(dentists?|dental|medical|clinics?|vets?|hotels?|motels?|cafes?|restaurants?|baker|shops?|stores?|pharmac|car park|parking|schools?|kindergarten|childcare|estate|apartments|real estate)\b/.test(n)) {
         return false;
       }
       return (
