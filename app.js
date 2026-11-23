@@ -789,17 +789,30 @@
     return null;
   }
 
+  async function fetchWithTimeout(url, timeoutMs = 4000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, {
+        headers: { Accept: 'application/json' },
+        signal: controller.signal
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async function fetchNearbyOverpassAmenities(lat, lng, suburbName, hubId) {
     // Fast, reliable parallel local POI search via Photon (bounded within ~3.5km of suburb)
     const dLat = 0.032; // ~3.5 km
     const dLng = 0.04;  // ~3.5 km
     const bbox = `${(lng - dLng).toFixed(4)},${(lat - dLat).toFixed(4)},${(lng + dLng).toFixed(4)},${(lat + dLat).toFixed(4)}`;
 
-    async function searchLocalPoi(queries) {
+    async function searchLocalPoi(queries, acceptFn) {
       for (const q of queries) {
         try {
-          const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&lat=${lat}&lon=${lng}&bbox=${bbox}&limit=6`;
-          const res = await fetch(url, { headers: { Accept: 'application/json' } });
+          const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&lat=${lat}&lon=${lng}&bbox=${bbox}&limit=10`;
+          const res = await fetchWithTimeout(url, 3500);
           if (!res.ok) continue;
           const data = await res.json();
           const features = (data && data.features) || [];
@@ -808,8 +821,9 @@
           for (const f of features) {
             const p = f.properties || {};
             if (!p.name) continue;
-            // Skip plain streets/roads when looking for POIs
-            if (p.osm_key === 'highway') continue;
+            // Skip plain streets/roads/houses when looking for POIs
+            if (p.osm_key === 'highway' || p.osm_key === 'place' || p.osm_value === 'house') continue;
+            if (acceptFn && !acceptFn(p)) continue;
             const [fLng, fLat] = f.geometry.coordinates;
             const dist = haversineKm(lat, lng, fLat, fLng);
             if (dist <= 4.5 && dist < bestDist) {
@@ -819,19 +833,71 @@
           }
           if (best) return best;
         } catch {
-          // try next query
+          // timeout or network error: try next query
         }
       }
       return null;
     }
 
+    const isNdisPoi = (p) => {
+      const n = p.name.toLowerCase();
+      if (/\b(vet|veterinary|animal|pet|dentist|dental|orthodont|beauty|nail|salon|spa|barber)\b/.test(n)) return false;
+      if (p.osm_value === 'veterinary' || p.osm_value === 'dentist') return false;
+      return (
+        p.osm_key === 'healthcare' ||
+        ['clinic', 'hospital', 'doctors', 'rehabilitation', 'physiotherapist'].includes(p.osm_value) ||
+        /\b(physio|physiotherapy|occupational|allied|rehab|medical|hospital|health)\b/.test(n)
+      );
+    };
+
+    const isCouncilPoi = (p) => {
+      const n = p.name.toLowerCase();
+      if (/\b(street library|little library|book box|free library|cafe|bar|hotel|motel|pub)\b/.test(n)) return false;
+      return (
+        ['library', 'townhall', 'community_centre', 'sports_centre', 'swimming_pool'].includes(p.osm_value) ||
+        /\b(library|civic|council|aquatic|leisure|community centre|community hub)\b/.test(n)
+      );
+    };
+
+    const isShopsPoi = (p) => {
+      const n = p.name.toLowerCase();
+      if (/\b(car park|parking|liquor|bottle|petrol|fuel|express)\b/.test(n)) return false;
+      return (
+        p.osm_key === 'shop' ||
+        ['supermarket', 'mall', 'department_store', 'marketplace'].includes(p.osm_value) ||
+        /\b(coles|woolworths|aldi|iga|supermarket|plaza|shopping centre)\b/.test(n)
+      );
+    };
+
+    const isTransitPoi = (p) => {
+      const n = p.name.toLowerCase();
+      if (/\b(hotel|cafe|bar|pub|clinic|dental|medical|pharmacy|newsagency|car park|parking)\b/.test(n)) return false;
+      return (
+        p.osm_key === 'railway' ||
+        p.osm_key === 'public_transport' ||
+        ['station', 'halt', 'tram_stop', 'bus_station', 'ferry_terminal'].includes(p.osm_value)
+      );
+    };
+
+    const isNaturePoi = (p) => {
+      const n = p.name.toLowerCase();
+      if (/\b(dentist|dental|medical|clinic|vet|hotel|motel|cafe|restaurant|bakery|shop|store|pharmacy|car park|parking|school|kindergarten|childcare|estate|apartments|real estate)\b/.test(n)) {
+        return false;
+      }
+      return (
+        (p.osm_key === 'leisure' && ['park', 'nature_reserve', 'garden', 'recreation_ground', 'common'].includes(p.osm_value)) ||
+        (p.osm_key === 'natural' && ['beach', 'coastline', 'wood', 'wetland', 'water'].includes(p.osm_value)) ||
+        (p.osm_key === 'boundary' && ['national_park', 'protected_area'].includes(p.osm_value))
+      );
+    };
+
     const [ndisHit, councilHit, shopsHit, transitHit, beachHit, parkHit] = await Promise.all([
-      searchLocalPoi([`${suburbName} physiotherapy`, 'physiotherapy', 'physio', 'occupational therapy', `${suburbName} hospital`, 'medical']),
-      searchLocalPoi([`${suburbName} library`, 'library', `${suburbName} council`, 'civic centre', 'aquatic', 'community centre']),
-      searchLocalPoi([`coles ${suburbName}`, `woolworths ${suburbName}`, 'coles', 'woolworths', 'aldi', 'iga', 'supermarket']),
-      searchLocalPoi([`${suburbName} station`, `${suburbName} railway`, 'train station', 'railway station', 'bus interchange']),
-      searchLocalPoi([`${suburbName} beach`, 'beach', 'national park', 'nature reserve']),
-      searchLocalPoi([`${suburbName} park`, `${suburbName} reserve`, 'park', 'reserve', 'gardens'])
+      searchLocalPoi([`${suburbName} physiotherapy`, 'physiotherapy', 'occupational therapy', `${suburbName} medical`], isNdisPoi),
+      searchLocalPoi([`${suburbName} library`, 'library', `${suburbName} aquatic`, 'community centre'], isCouncilPoi),
+      searchLocalPoi([`coles ${suburbName}`, `woolworths ${suburbName}`, 'supermarket', 'aldi'], isShopsPoi),
+      searchLocalPoi([`${suburbName} station`, 'train station', 'railway station', 'bus station'], isTransitPoi),
+      searchLocalPoi([`${suburbName} beach`, 'beach', 'national park', 'nature reserve'], isNaturePoi),
+      searchLocalPoi([`${suburbName} park`, `${suburbName} reserve`, 'park', 'gardens'], isNaturePoi)
     ]);
 
     const found = { ndis: null, council: null, shops: null, transit: null, nature: null };
